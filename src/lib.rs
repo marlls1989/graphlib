@@ -142,10 +142,9 @@ where
 
     pub fn count_labeled_vertices<W>(&self, label: &W) -> Option<usize>
     where
-        V: Borrow<W>,
-        W: Hash + Eq + Clone + ?Sized,
+        W: Borrow<V>,
     {
-        self.aliases.get(label).map(|set| set.len())
+        self.aliases.get(label.borrow()).map(|set| set.len())
     }
 
     pub fn append_vertex_label(&mut self, vertex: VertexIndex, label: V) -> bool {
