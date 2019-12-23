@@ -401,7 +401,8 @@ mod tests {
 
         let ab_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(ab).unwrap();
         let ab_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(ab).unwrap();
-        let labeled_a: BTreeSet<VertexIndex> = graph.collect_labeled_vertices("a").unwrap();
+        let labeled_a: BTreeSet<VertexIndex> =
+            graph.collect_labeled_vertices(&"a".to_string()).unwrap();
         assert_eq!(ab_pre, vec![].into_iter().collect());
         assert_eq!(ab_pos, vec![c, d].into_iter().collect());
 
