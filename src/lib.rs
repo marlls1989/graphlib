@@ -1,30 +1,24 @@
 use slab::Slab;
 use std::borrow::Borrow;
-use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::iter::FromIterator;
-use std::rc::Rc;
 
 pub type VertexIndex = usize;
 pub type EdgeIndex = (VertexIndex, VertexIndex);
 
 #[derive(Default, Clone)]
-struct Vertex<V: Hash + Eq> {
-    pub preset: BTreeSet<VertexIndex>,
-    pub posset: BTreeSet<VertexIndex>,
-    pub aliases: HashSet<Rc<V>>,
+struct Vertex<V: Hash + Eq + Clone> {
+    pub preset: HashSet<VertexIndex>,
+    pub posset: HashSet<VertexIndex>,
+    pub aliases: HashSet<V>,
 }
 
-impl<V> Vertex<V>
-where
-    V: Hash + Eq,
-{
+impl<V: Hash + Eq + Clone> Vertex<V> {
     pub fn new() -> Self {
         Vertex {
-            preset: BTreeSet::new(),
-            posset: BTreeSet::new(),
+            preset: HashSet::new(),
+            posset: HashSet::new(),
             aliases: HashSet::new(),
         }
     }
@@ -37,25 +31,19 @@ where
     }
 }
 
-pub struct Graph<V>
-where
-    V: Hash + Eq,
-{
+pub struct Graph<V: Hash + Eq + Clone> {
     nodes: Slab<Vertex<V>>,
-    trunks: BTreeSet<VertexIndex>,
-    leaves: BTreeSet<VertexIndex>,
-    aliases: HashMap<Rc<V>, BTreeSet<VertexIndex>>,
+    trunks: HashSet<VertexIndex>,
+    leaves: HashSet<VertexIndex>,
+    aliases: HashMap<V, HashSet<VertexIndex>>,
 }
 
-impl<V> Graph<V>
-where
-    V: Hash + Eq,
-{
+impl<V: Eq + Hash + Clone> Graph<V> {
     pub fn new() -> Self {
         Graph {
             nodes: Slab::new(),
-            trunks: BTreeSet::new(),
-            leaves: BTreeSet::new(),
+            trunks: HashSet::new(),
+            leaves: HashSet::new(),
             aliases: HashMap::new(),
         }
     }
@@ -131,8 +119,10 @@ where
         self.nodes.get(vertex).map(|node| node.posset.len())
     }
 
-    pub fn collect_labeled_vertices<B>(&self, label: &V) -> Option<B>
+    pub fn collect_labeled_vertices<B, W>(&self, label: &W) -> Option<B>
     where
+        V: Borrow<W>,
+        W: Eq + Hash + ?Sized,
         B: FromIterator<VertexIndex>,
     {
         self.aliases
@@ -140,24 +130,17 @@ where
             .map(|set| B::from_iter(set.iter().cloned()))
     }
 
-    pub fn count_labeled_vertices<W>(&self, label: &W) -> Option<usize>
-    where
-        W: Borrow<V>,
-    {
+    pub fn count_labeled_vertices<W: Borrow<V>>(&self, label: &W) -> Option<usize> {
         self.aliases.get(label.borrow()).map(|set| set.len())
     }
 
     pub fn append_vertex_label(&mut self, vertex: VertexIndex, label: V) -> bool {
-        let label = match self.aliases.get_key_value(&label) {
-            None => Rc::new(label),
-            Some((key, _)) => Rc::clone(key),
-        };
-        let set = self.aliases.entry(Rc::clone(&label)).or_default();
+        let set = self.aliases.entry(label.clone()).or_default();
 
         match self.nodes.get_mut(vertex) {
             None => false,
             Some(node) => {
-                node.aliases.insert(Rc::clone(&label));
+                node.aliases.insert(label.clone());
                 set.insert(vertex);
                 true
             }
@@ -239,8 +222,8 @@ where
     where
         I: IntoIterator<Item = VertexIndex>,
     {
-        let mut posset = BTreeSet::new();
-        let mut preset = BTreeSet::new();
+        let mut posset = HashSet::new();
+        let mut preset = HashSet::new();
         let mut aliases = HashSet::new();
         let mut reflexive = false;
 
@@ -296,7 +279,7 @@ where
         };
 
         for label in aliases.iter() {
-            self.aliases.entry(Rc::clone(label)).or_default().insert(id);
+            self.aliases.entry(label.clone()).or_default().insert(id);
         }
 
         let node = self.nodes.get_mut(id).unwrap();
@@ -397,104 +380,205 @@ mod tests {
         graph.connect(h, g);
         graph.connect(g, c);
 
-        let ab = graph.merge_vertices(vec![a, b]);
+        let a_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(a).unwrap();
+        let a_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(a).unwrap();
+        let labeled_a: HashSet<VertexIndex> = graph.collect_labeled_vertices("a").unwrap();
+        assert_eq!(a_pre, vec![].into_iter().collect());
+        assert_eq!(a_pos, vec![c].into_iter().collect());
+        assert_eq!(labeled_a, vec![a].into_iter().collect());
 
-        let ab_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(ab).unwrap();
-        let ab_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(ab).unwrap();
-        let labeled_a: BTreeSet<VertexIndex> =
-            graph.collect_labeled_vertices(&"a".to_string()).unwrap();
-        assert_eq!(ab_pre, vec![].into_iter().collect());
-        assert_eq!(ab_pos, vec![c, d].into_iter().collect());
+        let b_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(b).unwrap();
+        let b_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(b).unwrap();
+        let labeled_b: HashSet<VertexIndex> = graph.collect_labeled_vertices("b").unwrap();
+        assert_eq!(b_pre, vec![].into_iter().collect());
+        assert_eq!(b_pos, vec![c, d].into_iter().collect());
+        assert_eq!(labeled_b, vec![b].into_iter().collect());
 
-        let c_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(c).unwrap();
-        let c_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(c).unwrap();
-        // let c_label: BTreeSet<Rc<String>> = graph.collect_vertex_labels(ab).unwrap();
-        assert_eq!(c_pre, vec![g, ab].into_iter().collect());
+        let c_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(c).unwrap();
+        let c_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(c).unwrap();
+        let labeled_c: HashSet<VertexIndex> = graph.collect_labeled_vertices("c").unwrap();
+        assert_eq!(c_pre, vec![g, a, b].into_iter().collect());
         assert_eq!(c_pos, vec![e, f, h].into_iter().collect());
+        assert_eq!(labeled_c, vec![c].into_iter().collect());
 
-        let d_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(d).unwrap();
-        let d_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(d).unwrap();
-        assert_eq!(d_pre, vec![ab].into_iter().collect());
+        let d_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(d).unwrap();
+        let d_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(d).unwrap();
+        let labeled_d: HashSet<VertexIndex> = graph.collect_labeled_vertices("d").unwrap();
+        assert_eq!(d_pre, vec![b].into_iter().collect());
         assert_eq!(d_pos, vec![f].into_iter().collect());
+        assert_eq!(labeled_d, vec![d].into_iter().collect());
 
-        let e_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(e).unwrap();
-        let e_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(e).unwrap();
+        let e_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(e).unwrap();
+        let e_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(e).unwrap();
+        let labeled_e: HashSet<VertexIndex> = graph.collect_labeled_vertices("e").unwrap();
         assert_eq!(e_pos, vec![].into_iter().collect());
         assert_eq!(e_pre, vec![c].into_iter().collect());
+        assert_eq!(labeled_e, vec![e].into_iter().collect());
 
-        let f_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(f).unwrap();
-        let f_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(f).unwrap();
+        let f_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(f).unwrap();
+        let f_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(f).unwrap();
+        let labeled_f: HashSet<VertexIndex> = graph.collect_labeled_vertices("f").unwrap();
         assert_eq!(f_pos, vec![].into_iter().collect());
         assert_eq!(f_pre, vec![c, d].into_iter().collect());
+        assert_eq!(labeled_f, vec![f].into_iter().collect());
 
-        let h_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(h).unwrap();
-        let h_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(h).unwrap();
+        let h_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(h).unwrap();
+        let h_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(h).unwrap();
+        let labeled_h: HashSet<VertexIndex> = graph.collect_labeled_vertices("h").unwrap();
         assert_eq!(h_pos, vec![g].into_iter().collect());
         assert_eq!(h_pre, vec![c].into_iter().collect());
+        assert_eq!(labeled_h, vec![h].into_iter().collect());
 
-        let g_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(g).unwrap();
-        let g_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(g).unwrap();
+        let g_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(g).unwrap();
+        let g_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(g).unwrap();
+        let labeled_g: HashSet<VertexIndex> = graph.collect_labeled_vertices("g").unwrap();
         assert_eq!(g_pos, vec![c].into_iter().collect());
         assert_eq!(g_pre, vec![h].into_iter().collect());
+        assert_eq!(labeled_g, vec![g].into_iter().collect());
+
+        let ab = graph.merge_vertices(vec![a, b]);
+
+        let ab_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(ab).unwrap();
+        let ab_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(ab).unwrap();
+        let labeled_a: HashSet<VertexIndex> = graph.collect_labeled_vertices("a").unwrap();
+        let labeled_b: HashSet<VertexIndex> = graph.collect_labeled_vertices("b").unwrap();
+        assert_eq!(ab_pre, vec![].into_iter().collect());
+        assert_eq!(ab_pos, vec![c, d].into_iter().collect());
+        assert_eq!(labeled_a, vec![ab].into_iter().collect());
+        assert_eq!(labeled_b, vec![ab].into_iter().collect());
+
+        let c_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(c).unwrap();
+        let c_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(c).unwrap();
+        let labeled_c: HashSet<VertexIndex> = graph.collect_labeled_vertices("c").unwrap();
+        assert_eq!(c_pre, vec![g, ab].into_iter().collect());
+        assert_eq!(c_pos, vec![e, f, h].into_iter().collect());
+        assert_eq!(labeled_c, vec![c].into_iter().collect());
+
+        let d_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(d).unwrap();
+        let d_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(d).unwrap();
+        let labeled_d: HashSet<VertexIndex> = graph.collect_labeled_vertices("d").unwrap();
+        assert_eq!(d_pre, vec![ab].into_iter().collect());
+        assert_eq!(d_pos, vec![f].into_iter().collect());
+        assert_eq!(labeled_d, vec![d].into_iter().collect());
+
+        let e_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(e).unwrap();
+        let e_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(e).unwrap();
+        let labeled_e: HashSet<VertexIndex> = graph.collect_labeled_vertices("e").unwrap();
+        assert_eq!(e_pos, vec![].into_iter().collect());
+        assert_eq!(e_pre, vec![c].into_iter().collect());
+        assert_eq!(labeled_e, vec![e].into_iter().collect());
+
+        let f_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(f).unwrap();
+        let f_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(f).unwrap();
+        let labeled_f: HashSet<VertexIndex> = graph.collect_labeled_vertices("f").unwrap();
+        assert_eq!(f_pos, vec![].into_iter().collect());
+        assert_eq!(f_pre, vec![c, d].into_iter().collect());
+        assert_eq!(labeled_f, vec![f].into_iter().collect());
+
+        let h_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(h).unwrap();
+        let h_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(h).unwrap();
+        let labeled_h: HashSet<VertexIndex> = graph.collect_labeled_vertices("h").unwrap();
+        assert_eq!(h_pos, vec![g].into_iter().collect());
+        assert_eq!(h_pre, vec![c].into_iter().collect());
+        assert_eq!(labeled_h, vec![h].into_iter().collect());
+
+        let g_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(g).unwrap();
+        let g_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(g).unwrap();
+        let labeled_g: HashSet<VertexIndex> = graph.collect_labeled_vertices("g").unwrap();
+        assert_eq!(g_pos, vec![c].into_iter().collect());
+        assert_eq!(g_pre, vec![h].into_iter().collect());
+        assert_eq!(labeled_g, vec![g].into_iter().collect());
 
         let cd = graph.merge_vertices(vec![c, d]);
 
-        let ab_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(ab).unwrap();
-        let ab_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(ab).unwrap();
+        let ab_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(ab).unwrap();
+        let ab_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(ab).unwrap();
+        let labeled_a: HashSet<VertexIndex> = graph.collect_labeled_vertices("a").unwrap();
+        let labeled_b: HashSet<VertexIndex> = graph.collect_labeled_vertices("b").unwrap();
         assert_eq!(ab_pre, vec![].into_iter().collect());
         assert_eq!(ab_pos, vec![cd].into_iter().collect());
+        assert_eq!(labeled_a, vec![ab].into_iter().collect());
+        assert_eq!(labeled_b, vec![ab].into_iter().collect());
 
-        let cd_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(cd).unwrap();
-        let cd_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(cd).unwrap();
+        let cd_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(cd).unwrap();
+        let cd_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(cd).unwrap();
+        let labeled_c: HashSet<VertexIndex> = graph.collect_labeled_vertices("c").unwrap();
+        let labeled_d: HashSet<VertexIndex> = graph.collect_labeled_vertices("d").unwrap();
         assert_eq!(cd_pre, vec![g, ab].into_iter().collect());
         assert_eq!(cd_pos, vec![e, f, h].into_iter().collect());
+        assert_eq!(labeled_c, vec![cd].into_iter().collect());
+        assert_eq!(labeled_d, vec![cd].into_iter().collect());
 
-        let e_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(e).unwrap();
-        let e_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(e).unwrap();
+        let e_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(e).unwrap();
+        let e_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(e).unwrap();
+        let labeled_e: HashSet<VertexIndex> = graph.collect_labeled_vertices("e").unwrap();
         assert_eq!(e_pos, vec![].into_iter().collect());
         assert_eq!(e_pre, vec![cd].into_iter().collect());
+        assert_eq!(labeled_e, vec![e].into_iter().collect());
 
-        let f_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(f).unwrap();
-        let f_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(f).unwrap();
+        let f_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(f).unwrap();
+        let f_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(f).unwrap();
+        let labeled_f: HashSet<VertexIndex> = graph.collect_labeled_vertices("f").unwrap();
         assert_eq!(f_pos, vec![].into_iter().collect());
         assert_eq!(f_pre, vec![cd].into_iter().collect());
+        assert_eq!(labeled_f, vec![f].into_iter().collect());
 
-        let h_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(h).unwrap();
-        let h_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(h).unwrap();
+        let h_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(h).unwrap();
+        let h_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(h).unwrap();
+        let labeled_h: HashSet<VertexIndex> = graph.collect_labeled_vertices("h").unwrap();
         assert_eq!(h_pos, vec![g].into_iter().collect());
         assert_eq!(h_pre, vec![cd].into_iter().collect());
+        assert_eq!(labeled_h, vec![h].into_iter().collect());
 
-        let g_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(g).unwrap();
-        let g_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(g).unwrap();
+        let g_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(g).unwrap();
+        let g_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(g).unwrap();
+        let labeled_g: HashSet<VertexIndex> = graph.collect_labeled_vertices("g").unwrap();
         assert_eq!(g_pos, vec![cd].into_iter().collect());
         assert_eq!(g_pre, vec![h].into_iter().collect());
+        assert_eq!(labeled_g, vec![g].into_iter().collect());
 
         let ef = graph.merge_vertices(vec![e, f]);
 
-        let ab_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(ab).unwrap();
-        let ab_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(ab).unwrap();
-        assert_eq!(ab_pos, vec![cd].into_iter().collect());
+        let ab_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(ab).unwrap();
+        let ab_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(ab).unwrap();
+        let labeled_a: HashSet<VertexIndex> = graph.collect_labeled_vertices("a").unwrap();
+        let labeled_b: HashSet<VertexIndex> = graph.collect_labeled_vertices("b").unwrap();
         assert_eq!(ab_pre, vec![].into_iter().collect());
+        assert_eq!(ab_pos, vec![cd].into_iter().collect());
+        assert_eq!(labeled_a, vec![ab].into_iter().collect());
+        assert_eq!(labeled_b, vec![ab].into_iter().collect());
 
-        let cd_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(cd).unwrap();
-        let cd_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(cd).unwrap();
-        assert_eq!(cd_pos, vec![h, ef].into_iter().collect());
-        assert_eq!(cd_pre, vec![ab, g].into_iter().collect());
+        let cd_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(cd).unwrap();
+        let cd_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(cd).unwrap();
+        let labeled_c: HashSet<VertexIndex> = graph.collect_labeled_vertices("c").unwrap();
+        let labeled_d: HashSet<VertexIndex> = graph.collect_labeled_vertices("d").unwrap();
+        assert_eq!(cd_pre, vec![g, ab].into_iter().collect());
+        assert_eq!(cd_pos, vec![ef, h].into_iter().collect());
+        assert_eq!(labeled_c, vec![cd].into_iter().collect());
+        assert_eq!(labeled_d, vec![cd].into_iter().collect());
 
-        let ef_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(ef).unwrap();
-        let ef_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(ef).unwrap();
+        let ef_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(ef).unwrap();
+        let ef_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(ef).unwrap();
+        let labeled_e: HashSet<VertexIndex> = graph.collect_labeled_vertices("e").unwrap();
+        let labeled_f: HashSet<VertexIndex> = graph.collect_labeled_vertices("f").unwrap();
         assert_eq!(ef_pos, vec![].into_iter().collect());
         assert_eq!(ef_pre, vec![cd].into_iter().collect());
+        assert_eq!(labeled_e, vec![ef].into_iter().collect());
+        assert_eq!(labeled_f, vec![ef].into_iter().collect());
 
-        let h_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(h).unwrap();
-        let h_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(h).unwrap();
+        let h_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(h).unwrap();
+        let h_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(h).unwrap();
+        let labeled_h: HashSet<VertexIndex> = graph.collect_labeled_vertices("h").unwrap();
         assert_eq!(h_pos, vec![g].into_iter().collect());
         assert_eq!(h_pre, vec![cd].into_iter().collect());
+        assert_eq!(labeled_h, vec![h].into_iter().collect());
 
-        let g_pos: BTreeSet<VertexIndex> = graph.collect_vertex_posset(g).unwrap();
-        let g_pre: BTreeSet<VertexIndex> = graph.collect_vertex_preset(g).unwrap();
+        let g_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(g).unwrap();
+        let g_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(g).unwrap();
+        let labeled_g: HashSet<VertexIndex> = graph.collect_labeled_vertices("g").unwrap();
         assert_eq!(g_pos, vec![cd].into_iter().collect());
         assert_eq!(g_pre, vec![h].into_iter().collect());
+        assert_eq!(labeled_g, vec![g].into_iter().collect());
     }
 
     #[test]
@@ -509,22 +593,22 @@ mod tests {
         graph.connect(b, d);
         graph.connect(d, c);
 
-        let a_pos: Vec<VertexIndex> = graph.collect_vertex_posset(a).unwrap();
-        let b_pos: Vec<VertexIndex> = graph.collect_vertex_posset(b).unwrap();
-        let c_pos: Vec<VertexIndex> = graph.collect_vertex_posset(c).unwrap();
-        let d_pos: Vec<VertexIndex> = graph.collect_vertex_posset(d).unwrap();
-        let a_pre: Vec<VertexIndex> = graph.collect_vertex_preset(a).unwrap();
-        let b_pre: Vec<VertexIndex> = graph.collect_vertex_preset(b).unwrap();
-        let c_pre: Vec<VertexIndex> = graph.collect_vertex_preset(c).unwrap();
-        let d_pre: Vec<VertexIndex> = graph.collect_vertex_preset(d).unwrap();
+        let a_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(a).unwrap();
+        let b_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(b).unwrap();
+        let c_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(c).unwrap();
+        let d_pos: HashSet<VertexIndex> = graph.collect_vertex_posset(d).unwrap();
+        let a_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(a).unwrap();
+        let b_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(b).unwrap();
+        let c_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(c).unwrap();
+        let d_pre: HashSet<VertexIndex> = graph.collect_vertex_preset(d).unwrap();
 
-        assert_eq!(a_pos, vec![b]);
-        assert_eq!(b_pos, vec![c, d]);
-        assert_eq!(c_pos, vec![]);
-        assert_eq!(d_pos, vec![c]);
-        assert_eq!(a_pre, vec![]);
-        assert_eq!(b_pre, vec![a]);
-        assert_eq!(c_pre, vec![b, d]);
-        assert_eq!(d_pre, vec![b]);
+        assert_eq!(a_pos, vec![b].into_iter().collect());
+        assert_eq!(b_pos, vec![c, d].into_iter().collect());
+        assert_eq!(c_pos, vec![].into_iter().collect());
+        assert_eq!(d_pos, vec![c].into_iter().collect());
+        assert_eq!(a_pre, vec![].into_iter().collect());
+        assert_eq!(b_pre, vec![a].into_iter().collect());
+        assert_eq!(c_pre, vec![b, d].into_iter().collect());
+        assert_eq!(d_pre, vec![b].into_iter().collect());
     }
 }
