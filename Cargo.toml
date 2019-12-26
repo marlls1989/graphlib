@@ -1,5 +1,5 @@
 [package]
-name = "graphlib"
+name = "labeledgraph"
 version = "0.1.0"
 authors = ["Marcos Sartori <msartori@ieee.org>"]
 edition = "2018"
