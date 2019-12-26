@@ -3,6 +3,9 @@ name = "labeledgraph"
 version = "0.1.0"
 authors = ["Marcos Sartori <msartori@ieee.org>"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/marlls1989/labeledgraph"
+description = "A flexible graph library for rust"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
