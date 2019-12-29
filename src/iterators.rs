@@ -2,6 +2,7 @@ use crate::VertexIndex;
 use std::collections::hash_set;
 use std::iter::Cloned;
 
+#[derive(Clone, Debug)]
 pub struct VertexIter<'a> {
   inner: Cloned<hash_set::Iter<'a, VertexIndex>>,
 }
@@ -24,6 +25,7 @@ impl<'a> Iterator for VertexIter<'a> {
   }
 }
 
+#[derive(Clone, Debug)]
 pub struct LabelIter<'a, T: 'a> {
   inner: hash_set::Iter<'a, T>,
 }

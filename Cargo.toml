@@ -1,6 +1,6 @@
 [package]
 name = "labeledgraph"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Marcos Sartori <msartori@ieee.org>"]
 edition = "2018"
 license = "MIT"
@@ -10,4 +10,4 @@ description = "A flexible graph library for rust"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-slab = "0.4.2"
+slab = "^0.4.2"
